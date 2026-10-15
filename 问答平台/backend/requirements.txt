@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+passlib[bcrypt]
+bcrypt==4.0.1
+PyJWT
+sqlalchemy==2.0.36
