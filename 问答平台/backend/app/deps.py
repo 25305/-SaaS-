@@ -1,25 +1,17 @@
 from typing import Generator
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWTError
 from sqlalchemy.orm import Session
 
 from app.core.errors import BizError
-from app.db import SessionLocal
+from app.db.session import get_db  # 数据访问层提供,再由本模块统一对外提供依赖
 from app.models import User
 from app.security import decode_token, is_revoked
-from app.tenant_scope import TENANT_BYPASS_KEY, TENANT_ID_KEY
+from app.db.tenant_hook import TENANT_ID_KEY, bypass_tenant_filter
 
 _bearer = HTTPBearer(auto_error=False)
-
-
-def get_db() -> Generator:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def decode_credentials(cred: HTTPAuthorizationCredentials = Depends(_bearer)) -> dict:
@@ -36,6 +28,7 @@ def decode_credentials(cred: HTTPAuthorizationCredentials = Depends(_bearer)) ->
 
 
 def get_current_user(
+    request: Request,
     payload: dict = Depends(decode_credentials),
     db: Session = Depends(get_db),
 ) -> User:
@@ -50,7 +43,7 @@ def get_current_user(
         raise BizError("INVALID_TOKEN", "登录已过期或无效", 401)
     # 关键：加载用户之前，把租户上下文挂到本次请求的 Session 上。
     # FastAPI 依赖缓存保证同一请求内所有依赖/端点共享同一个 Session 对象，
-    # tenant_scope.py 的 ORM 事件从这里读取当前租户（详见该文件 docstring）。
+    # app/db/tenant_hook.py 的 ORM 事件从这里读取当前租户（详见该文件 docstring）。
     db.info[TENANT_ID_KEY] = int(tenant_id)
     user = db.get(User, int(user_id))
     if user is None:
@@ -62,6 +55,7 @@ def get_current_user(
         raise BizError("ACCOUNT_DISABLED", "账号已被禁用", 403)
     if not user.tenant.is_active:
         raise BizError("TENANT_DISABLED", "租户已停用", 403)
+    request.state.tenant_id = user.tenant_id
     return user
 
 
@@ -75,9 +69,9 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
 def require_super_admin(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> User:
-    """平台管理员。校验通过后为本请求设置隔离绕过标记(全局统计等场景需要)。"""
+) -> Generator[User, None, None]:
+    """仅超级管理员在本请求内临时打开全局业务数据视图。"""
     if current_user.role_code != "super_admin":
         raise BizError("FORBIDDEN", "无权限执行该操作，需要平台管理员权限", 403)
-    db.info[TENANT_BYPASS_KEY] = True  # 与 get_current_user 拿到的是同一个 Session
-    return current_user
+    with bypass_tenant_filter(db):
+        yield current_user

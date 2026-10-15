@@ -1,8 +1,10 @@
 from sqlalchemy import select
 
-from app.db import Base, SessionLocal, engine
+from app.db.base import Base
+from app.db.session import SessionLocal, engine
 from app.models import Document, KnowledgeBase, Role, Tenant, User
 from app.security import hash_password
+from app.db.tenant_hook import TENANT_BYPASS_KEY
 
 # 保留租户编码：注册接口不允许占用
 RESERVED_TENANT_CODES = {"platform"}
@@ -49,6 +51,8 @@ def run_seed() -> None:
     """幂等写入角色、演示租户与账号；每次运行重置其密码/角色，保证演示账号可用。"""
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
+        # seed 是经过审核的跨租户维护入口;仅限此独立 Session,不复用请求 Session。
+        db.info[TENANT_BYPASS_KEY] = True
         # 1. 角色
         roles: dict[str, Role] = {}
         for code, name in ROLES:
@@ -91,7 +95,7 @@ def run_seed() -> None:
             user.is_active = True
 
         # 4. 知识库与文档(幂等:同租户下同名知识库/文档已存在则跳过,不重复、不覆盖)
-        # 注意:seed 的 Session 没有租户上下文,tenant_scope 的钩子会放行(见该文件 docstring)
+        # seed 独立 Session 上已显式声明授权绕过;常规请求缺上下文时业务表会被拒绝
         for tenant_code, kb_name, kb_desc, docs in KB_SEEDS:
             kb = db.execute(
                 select(KnowledgeBase).where(

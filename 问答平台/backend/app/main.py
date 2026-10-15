@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from pathlib import Path
 
@@ -10,11 +9,18 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
 
 from app import models  # noqa: F401  导入以注册表结构到 Base.metadata
-from app import tenant_scope  # noqa: F401  导入即注册多租户隔离的 ORM 事件(须在业务查询发生前)
+from app.db import tenant_hook  # noqa: F401  导入即注册多租户隔离的 ORM 事件(须在业务查询发生前)
+from app.config import settings
 from app.core.errors import BizError
-from app.db import Base, engine
-from app.routers import admin, auth, kb, tenant
+from app.core.logging import logger, setup_logging
+from app.db.base import Base
+from app.db.session import engine
+from app.middleware.request_id import RequestContextMiddleware
+from app.api.v1 import health
+from app.routers import admin, auth, kb, tenant, usage
 from app.seed import run_seed
+
+setup_logging()
 
 
 @asynccontextmanager
@@ -31,7 +37,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app = FastAPI(
     title="智能问答 SaaS 平台",
-    version="0.1.0",
+    version=settings.APP_VERSION,
     lifespan=lifespan,
     docs_url=None,
 )
@@ -43,6 +49,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 
 @app.exception_handler(BizError)
@@ -74,7 +81,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         content={
             "code": "VALIDATION_ERROR",
             "message": "请求参数校验失败",
-            "data": jsonable_encoder(exc.errors()),
+            # Pydantic 错误默认附带 input,可能含明文密码；只返回字段位置与原因。
+            "data": [
+                {"loc": list(item.get("loc", ())), "type": item.get("type"), "msg": item.get("msg")}
+                for item in exc.errors()
+            ],
         },
     )
 
@@ -82,11 +93,6 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 @app.get("/", summary="服务信息")
 def root():
     return {"message": "问答平台API正常"}
-
-
-@app.get("/health", summary="健康检查")
-def health():
-    return {"code": 0, "message": "ok", "data": {"service": "up"}}
 
 
 @app.get("/docs", include_in_schema=False)
@@ -108,3 +114,5 @@ app.include_router(auth.router)
 app.include_router(tenant.router)
 app.include_router(admin.router)
 app.include_router(kb.router)
+app.include_router(usage.router)
+app.include_router(health.router)

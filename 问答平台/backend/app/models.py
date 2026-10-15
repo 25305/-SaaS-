@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db import Base
+from app.db.base import Base, TenantMixin
 
 
 class Role(Base):
@@ -46,21 +46,9 @@ class User(Base):
         return self.role.code
 
 
-class TenantMixin:
-    """所有租户业务数据的公共父类(模块 B 行级隔离,FR-B1)。
-
-    - 继承它的表自动带上 tenant_id 外键列;
-    - app/tenant_scope.py 的 ORM 事件会自动为这些表注入/校验租户条件,
-      新模块(如模块 D 的用量流水)只要继承它就自动获得隔离能力(FR-B4);
-    - User/Role/Tenant 不继承本类:登录、注册、用户名全局查重等必须全局查询,
-      属"身份层"而非"业务数据层",详见 docs/隔离验证报告.md。
-    """
-
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
-
-
 class KnowledgeBase(TenantMixin, Base):
     __tablename__ = "knowledge_bases"
+    __table_args__ = (Index("ix_kb_tenant_created", "tenant_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100))  # 知识库名称
@@ -70,9 +58,29 @@ class KnowledgeBase(TenantMixin, Base):
 
 class Document(TenantMixin, Base):
     __tablename__ = "documents"
+    __table_args__ = (Index("ix_doc_tenant_created", "tenant_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     kb_id: Mapped[int] = mapped_column(ForeignKey("knowledge_bases.id"), index=True)  # 所属知识库
     title: Mapped[str] = mapped_column(String(200))  # 文档标题
     content: Mapped[str] = mapped_column(Text)  # 正文(问答知识库语料)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UsageRecord(TenantMixin, Base):
+    """请求用量流水(模块 B,FR-B4)。
+
+    继承 TenantMixin 即自动获得读写隔离:租户 B 的看板/明细查不到租户 A 的数据。
+    api_key_id 预留给模块 C 的 API Key 体系;为 NULL 表示用 JWT 登录态访问。
+    """
+
+    __tablename__ = "usage_records"
+    __table_args__ = (Index("ix_usage_tenant_created", "tenant_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    api_key_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 预留:发起调用的 Key
+    method: Mapped[str] = mapped_column(String(10))  # HTTP 方法
+    path: Mapped[str] = mapped_column(String(200), index=True)  # 请求路径
+    status_code: Mapped[int] = mapped_column(Integer)  # 响应状态码
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)  # 耗时(毫秒)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

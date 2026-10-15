@@ -1,7 +1,7 @@
 """知识库与文档接口(模块 B 数据隔离的展示点)。
 
 注意:本文件里所有查询都【没有】手写 tenant_id 条件——
-租户条件由 app/tenant_scope.py 的 ORM 事件统一注入(FR-B2 要求)。
+租户条件由 app/db/tenant_hook.py 的 ORM 事件统一注入(FR-B2 要求)。
 因此别的租户拿自己的 token 来访问本租户的资源 ID 时,
 查询结果同样是"查不到" → 与"资源不存在"返回完全相同的 404,
 不泄露资源是否存在(FR-B3)。
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/kb", tags=["知识库"])
 def _get_own_kb(kb_id: int, db: Session) -> KnowledgeBase:
     """统一获取"本租户自己的知识库"。
 
-    where 里只有 id 条件,租户条件由 tenant_scope 的 ORM 事件自动注入:
+    where 里只有 id 条件,租户条件由 tenant_hook 的 ORM 事件自动注入:
     本租户查自己的 → 正常返回;别的租户查这个 id → 同样是 None → 404,
     响应里不带任何资源信息,不泄露存在性(FR-B3)。
     """
