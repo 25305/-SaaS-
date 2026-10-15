@@ -94,3 +94,63 @@ class DocInfo(BaseModel):
     title: str = Field(description="文档标题")
     content: str = Field(description="正文内容")
     created_at: datetime = Field(description="创建时间")
+
+
+# ---------------- 模块 C:API Key ----------------
+class KeyCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60, description="用途描述,如「官网问答机器人」")
+    quota_monthly_tokens: Optional[int] = Field(
+        default=None, ge=0, description="该 Key 的月度 Token 上限;不填则继承租户配额"
+    )
+    quota_monthly_requests: Optional[int] = Field(
+        default=None, ge=0, description="该 Key 的月度请求次数上限;不填则继承租户配额"
+    )
+    rate_limit_per_minute: Optional[int] = Field(
+        default=None, ge=1, description="每分钟请求数上限(供限流模块读取)"
+    )
+    rate_limit_per_hour: Optional[int] = Field(
+        default=None, ge=1, description="每小时请求数上限(供限流模块读取)"
+    )
+
+
+class KeyCreatedOut(BaseModel):
+    id: int = Field(description="Key ID")
+    name: str = Field(description="用途描述")
+    key: str = Field(description="完整 Key;**仅此一次返回**,请立即保存")
+    masked: str = Field(description="掩码展示,如 sk-abc12345...xyz9")
+    warning: str = Field(description="安全提示")
+    expire_at: Optional[datetime] = Field(default=None, description="过期时间(轮换时才有)")
+
+
+class KeyInfo(BaseModel):
+    id: int = Field(description="Key ID")
+    name: str = Field(description="用途描述")
+    masked: str = Field(description="掩码,列表接口绝不返回完整 Key")
+    status: str = Field(description="active / expiring / revoked")
+    expire_at: Optional[datetime] = Field(default=None, description="过期时间")
+    quota_monthly_tokens: Optional[int] = Field(default=None, description="该 Key 的月度 Token 上限")
+    quota_monthly_requests: Optional[int] = Field(default=None, description="该 Key 的月度请求次数上限")
+    rate_limit_per_minute: Optional[int] = Field(default=None, description="每分钟请求数上限")
+    rate_limit_per_hour: Optional[int] = Field(default=None, description="每小时请求数上限")
+    last_used_at: Optional[datetime] = Field(default=None, description="最后使用时间(泄漏排查用)")
+    last_used_ip: Optional[str] = Field(default=None, description="最后使用来源 IP")
+    created_at: datetime = Field(description="创建时间")
+
+
+# ---------------- 模块 D:问答与配额 ----------------
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=2000, description="用户问题")
+    model: Optional[str] = Field(
+        default=None, description="指定模型名,不填用服务端默认模型"
+    )
+
+
+class QuotaStatusOut(BaseModel):
+    allowed: bool = Field(description="当前是否还有配额")
+    used_tokens: int = Field(description="本周期已用 Token")
+    limit_tokens: Optional[int] = Field(default=None, description="本周期 Token 上限;null 为不限制")
+    used_requests: int = Field(description="本周期已用请求次数")
+    limit_requests: Optional[int] = Field(default=None, description="本周期请求次数上限;null 为不限制")
+    reset_at: str = Field(description="配额重置时间(下个周期起始日)")
+    policy: str = Field(description="超额行为:reject / soft_warn")
+    key_id: Optional[int] = Field(default=None, description="按 Key 调用时的 Key ID")

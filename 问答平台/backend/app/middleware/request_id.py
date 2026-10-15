@@ -32,8 +32,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         incoming_id = request.headers.get("X-Request-Id", "")
         request_id = incoming_id if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", incoming_id) else uuid.uuid4().hex[:16]
         request.state.request_id = request_id
-        request.state.tenant_id = None      # 由 deps.get_current_user 认证后写入
-        request.state.key_prefix = None     # 预留:API Key 鉴权模块写入前缀
+        request.state.tenant_id = None      # 由 deps.get_current_context 鉴权后写入
+        request.state.key_prefix = None     # API Key 鉴权时写入前缀(不写完整值)
+        request.state.api_key_id = None     # API Key 鉴权时写入 Key ID(FR-C5 按 Key 统计)
         token = request_id_var.set(request_id)
 
         start = time.perf_counter()
@@ -65,6 +66,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 status_code=response.status_code,
                 latency_ms=elapsed_ms,
+                api_key_id=getattr(request.state, "api_key_id", None),
             )
         return response
 

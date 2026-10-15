@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import select
 
 from app.db.base import Base
@@ -8,6 +10,10 @@ from app.db.tenant_hook import TENANT_BYPASS_KEY
 
 # 保留租户编码：注册接口不允许占用
 RESERVED_TENANT_CODES = {"platform"}
+
+# 演示租户的兜底配额(模块 D):只在字段为 NULL 时填,不覆盖管理员已调整过的值
+DEFAULT_QUOTA_TOKENS = 1_000_000
+DEFAULT_QUOTA_REQUESTS = 10_000
 
 ROLES = [
     ("super_admin", "平台管理员"),
@@ -119,4 +125,13 @@ def run_seed() -> None:
                             kb_id=kb.id, tenant_id=kb.tenant_id, title=title, content=content
                         )
                     )
+
+        # 5. 配额兜底(模块 C/D):为空的维度填默认值,使演示租户开箱即有真实配额
+        for tenant in tenants.values():
+            if tenant.period_start is None:
+                tenant.period_start = date.today().replace(day=1)
+            if tenant.quota_monthly_tokens is None:
+                tenant.quota_monthly_tokens = DEFAULT_QUOTA_TOKENS
+            if tenant.quota_monthly_requests is None:
+                tenant.quota_monthly_requests = DEFAULT_QUOTA_REQUESTS
         db.commit()

@@ -14,9 +14,10 @@ from app.config import settings
 from app.core.errors import BizError
 from app.core.logging import logger, setup_logging
 from app.db.base import Base
+from app.db.schema import ensure_schema
 from app.db.session import engine
 from app.middleware.request_id import RequestContextMiddleware
-from app.api.v1 import health
+from app.api.v1 import apikey, health, qa, usage as usage_v1
 from app.routers import admin, auth, kb, tenant, usage
 from app.seed import run_seed
 
@@ -26,6 +27,7 @@ setup_logging()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_schema()  # 既有库补列(新增表由 create_all 建)
     run_seed()
     yield
 
@@ -54,10 +56,8 @@ app.add_middleware(RequestContextMiddleware)
 
 @app.exception_handler(BizError)
 async def biz_error_handler(request: Request, exc: BizError):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"code": exc.code, "message": exc.message, "data": None},
-    )
+    # to_dict 会带上 exc.data(如配额超限的 used/limit/reset_at,FR-D3 要求)
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
 
 @app.exception_handler(HTTPException)
@@ -115,4 +115,8 @@ app.include_router(tenant.router)
 app.include_router(admin.router)
 app.include_router(kb.router)
 app.include_router(usage.router)
+# 模块 C/D:API Key 生命周期、配额与用量、问答(预检 → 缓存 → 模型)
+app.include_router(apikey.router)
+app.include_router(usage_v1.router)
+app.include_router(qa.router)
 app.include_router(health.router)

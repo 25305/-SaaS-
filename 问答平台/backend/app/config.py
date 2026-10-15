@@ -37,6 +37,11 @@ class Settings:
     MODEL_BASE_URL: str = os.getenv("MODEL_BASE_URL", "")
     MODEL_API_KEY: str = os.getenv("MODEL_API_KEY", "")
     MODEL_TIMEOUT_SECONDS: float = float(os.getenv("MODEL_TIMEOUT_SECONDS", "3"))
+    # 计入计量的模型名(本地模拟模型用此名;接入真实上游时填真实模型 ID)
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "local-simulation")
+
+    # ---------------- 问答缓存(模块 D) ----------------
+    QA_CACHE_TTL_SECONDS: int = int(os.getenv("QA_CACHE_TTL_SECONDS", "300"))
 
 
 settings = Settings()
