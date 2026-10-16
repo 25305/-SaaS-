@@ -1,0 +1,11 @@
+<template><section class="page"><div class="toolbar"><button class="primary" @click="showCreate = true">创建 Key</button></div><StateWrapper :loading="loading" :error="error" :empty="!keys.length" empty-text="还没有 API Key。" @retry="load"><table><thead><tr><th>名称</th><th>Key</th><th>状态</th><th>最后使用</th><th>操作</th></tr></thead><tbody><tr v-for="key in keys" :key="key.id"><td>{{ key.name }}</td><td><code>{{ key.masked }}</code></td><td>{{ key.status }}</td><td>{{ key.last_used_at || '从未使用' }}</td><td><button @click="rotate(key)">轮换</button><button class="danger" @click="revoke(key)">吊销</button></td></tr></tbody></table></StateWrapper><form v-if="showCreate" class="modal" @submit.prevent="create"><h3>创建 API Key</h3><input v-model.trim="name" placeholder="用途名称" /><button class="primary">创建</button><button type="button" @click="showCreate=false">取消</button></form><section v-if="revealed" class="modal key-reveal"><h3>请立即保存 API Key</h3><code>{{ revealed }}</code><p>关闭后将无法再次查看完整值。</p><button class="primary" @click="copy">复制</button><button @click="revealed=''">我已保存</button></section></section></template>
+<script setup>
+import { onMounted, ref } from 'vue'; import { request } from '../api'; import StateWrapper from '../components/StateWrapper.vue'
+const keys = ref([]), loading = ref(false), error = ref(''), showCreate = ref(false), name = ref(''), revealed = ref('')
+async function load() { loading.value=true; error.value=''; try { keys.value=await request('/api/v1/apikeys') } catch(e) { error.value=e.message } finally { loading.value=false } }
+async function create() { if (!name.value) return error.value='请输入用途名称'; try { const data=await request('/api/v1/apikeys',{method:'POST',body:JSON.stringify({name:name.value})}); revealed.value=data.key; showCreate.value=false; name.value=''; await load() } catch(e) { error.value=e.message } }
+async function rotate(key) { try { const data=await request(`/api/v1/apikeys/${key.id}/rotate`,{method:'POST'}); revealed.value=data.key; await load() } catch(e) { error.value=e.message } }
+async function revoke(key) { if (!confirm(`确认吊销 ${key.name}？`)) return; try { await request(`/api/v1/apikeys/${key.id}`,{method:'DELETE'}); await load() } catch(e) { error.value=e.message } }
+async function copy() { await navigator.clipboard.writeText(revealed.value) }
+onMounted(load)
+</script>

@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.errors import BizError
 from app.core.response import ok
 from app.deps import get_db, require_super_admin
-from app.models import Role, Tenant, User
-from app.schemas import TenantCreate, TenantInfo
+from app.models import Role, Tenant, UsageSummary, User
+from app.schemas import TenantCreate, TenantInfo, TenantQuotaUpdate
 from app.security import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["平台管理"])
@@ -94,3 +94,35 @@ def enable_tenant(
     db: Session = Depends(get_db),
 ):
     return _set_active(tenant_id, True, db)
+
+
+@router.patch("/tenants/{tenant_id}/quota", summary="配置租户月度配额")
+def update_tenant_quota(
+    tenant_id: int,
+    payload: TenantQuotaUpdate,
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    tenant = db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise BizError("TENANT_NOT_FOUND", "租户不存在", 404)
+    tenant.quota_monthly_tokens = payload.quota_monthly_tokens
+    tenant.quota_monthly_requests = payload.quota_monthly_requests
+    tenant.overage_policy = payload.overage_policy
+    db.commit()
+    return ok(message="租户配额已更新")
+
+
+@router.get("/usage", summary="平台全局用量")
+def global_usage(
+    current_user: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
+    row = db.execute(
+        select(
+            func.coalesce(func.sum(UsageSummary.requests), 0),
+            func.coalesce(func.sum(UsageSummary.prompt_tokens), 0),
+            func.coalesce(func.sum(UsageSummary.completion_tokens), 0),
+        )
+    ).one()
+    return ok({"total_requests": int(row[0]), "prompt_tokens": int(row[1]), "completion_tokens": int(row[2])})

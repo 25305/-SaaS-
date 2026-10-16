@@ -54,16 +54,16 @@ def ask(
     question = payload.question.strip()
 
     # 限流必须在模型调用前执行；配额检查仍紧随其后。
-    if ctx.key_id is not None:
-        key = db.get(ApiKey, ctx.key_id)
-        allowed, retry_after, window = enforce(
-            ctx.tenant_id, ctx.key_id,
-            key.rate_limit_per_minute if key else None,
-            key.rate_limit_per_hour if key else None,
-        )
-        if not allowed:
-            response.headers['Retry-After'] = str(retry_after)
-            raise BizError('RATE_LIMITED', f'{window} 频率已超过限制', 429, {'retry_after': retry_after})
+    key = db.get(ApiKey, ctx.key_id) if ctx.key_id is not None else None
+    allowed, retry_after, window = enforce(
+        ctx.tenant_id, ctx.key_id,
+        key.rate_limit_per_minute if key else None,
+        key.rate_limit_per_hour if key else None,
+        tenant_per_minute=settings.TENANT_RATE_LIMIT_PER_MINUTE,
+        tenant_per_hour=settings.TENANT_RATE_LIMIT_PER_HOUR,
+    )
+    if not allowed:
+        raise BizError('RATE_LIMITED', f'{window} 频率已超过限制', 429, {'retry_after': retry_after})
 
     # ── 第 1 步:配额预检(此时绝不调用模型) ──────────────────────────
     quota = quota_service.check(db, ctx)
@@ -99,6 +99,7 @@ def ask(
     cache_key = tenant_key(ctx.tenant_id, "qa", question)
     cached = cache.get(cache_key)
     if cached is not None:
+        response.headers["X-Cache"] = "HIT"
         metering.record_cache_hit(db, ctx, model=model)
         logger.info(
             "qa_cache_hit",
@@ -109,6 +110,7 @@ def ask(
             "answer": cached,
             "model": model,
             "cache_hit": True,
+            "sources": [],
             "tokens": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             "latency_ms": 0,
         })
@@ -150,12 +152,14 @@ def ask(
         latency_ms=latency_ms,
     )
     cache.set(cache_key, completion.answer, ttl=settings.QA_CACHE_TTL_SECONDS)
+    response.headers["X-Cache"] = "MISS"
 
     return ok({
         "answer": completion.answer,
         "model": completion.model,
         "model_provider": completion.provider,
         "cache_hit": False,
+        "sources": context,
         "tokens": {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
