@@ -35,6 +35,8 @@ from app.services.metering import service as metering
 from app.services.model import rag
 from app.services.model.llm_client import LlmUsage, measure_latency
 from app.services.quota import service as quota_service
+from app.services.rate_limit import enforce
+from app.models import ApiKey
 
 router = APIRouter(prefix="/api/v1/qa", tags=["问答"])
 
@@ -50,6 +52,18 @@ def ask(
 ):
     model = payload.model or settings.MODEL_NAME
     question = payload.question.strip()
+
+    # 限流必须在模型调用前执行；配额检查仍紧随其后。
+    if ctx.key_id is not None:
+        key = db.get(ApiKey, ctx.key_id)
+        allowed, retry_after, window = enforce(
+            ctx.tenant_id, ctx.key_id,
+            key.rate_limit_per_minute if key else None,
+            key.rate_limit_per_hour if key else None,
+        )
+        if not allowed:
+            response.headers['Retry-After'] = str(retry_after)
+            raise BizError('RATE_LIMITED', f'{window} 频率已超过限制', 429, {'retry_after': retry_after})
 
     # ── 第 1 步:配额预检(此时绝不调用模型) ──────────────────────────
     quota = quota_service.check(db, ctx)

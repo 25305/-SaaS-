@@ -9,11 +9,11 @@ const metrics = ref({ total_requests: 0, prompt_tokens: 0, completion_tokens: 0,
 const hasData = computed(() => metrics.value.total_requests > 0)
 async function refresh() {
   loading.value = true; error.value = ''
-  try { const response = await fetch(`/dashboard?tenant_id=${tenant.value}`); if (!response.ok) throw new Error('加载失败'); metrics.value = (await response.json()).summary }
+  try { const response = await fetch(`/api/usage/dashboard?days=30`); if (!response.ok) throw new Error('加载失败'); metrics.value = (await response.json()).data.summary }
   catch (e) { error.value = e.message }
   finally { loading.value = false }
 }
-function exportBill(type) { window.open(`/billing/export${type === 'xlsx' ? '.xlsx' : ''}?tenant_id=${tenant.value}`, '_blank') }
+function exportBill(type) { window.open(`/api/usage/billing/export${type === 'xlsx' ? '.xlsx' : ''}?days=30`, '_blank') }
 </script>
 
 <template>
