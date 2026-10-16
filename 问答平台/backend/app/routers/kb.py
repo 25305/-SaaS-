@@ -16,6 +16,7 @@ from app.core.response import ok
 from app.deps import get_current_user, get_db, require_admin
 from app.models import Document, KnowledgeBase, User
 from app.schemas import DocCreate, DocInfo, DocUpdate, KBCreate, KBInfo, KBUpdate
+from app.services.cache.backend import invalidate_tenant
 
 router = APIRouter(prefix="/api/kb", tags=["知识库"])
 
@@ -88,6 +89,7 @@ def create_kb(
     db.flush()  # 先 flush 拿到自增 id(before_flush 守卫在此执行)
     new_id = kb.id
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok({"id": new_id}, message="知识库创建成功")
 
 
@@ -127,6 +129,7 @@ def update_kb(
     if req.description is not None:
         kb.description = req.description
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok(message="修改成功")
 
 
@@ -144,6 +147,7 @@ def delete_kb(
         db.delete(doc)
     db.delete(kb)
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok(message="知识库已删除")
 
 
@@ -189,6 +193,7 @@ def create_doc(
     db.flush()
     new_id = doc.id
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok({"id": new_id}, message="文档添加成功")
 
 
@@ -229,6 +234,7 @@ def update_doc(
     if req.content is not None:
         doc.content = req.content
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok(message="修改成功")
 
 
@@ -243,4 +249,5 @@ def delete_doc(
     doc = _get_own_doc(kb, doc_id, db)
     db.delete(doc)
     db.commit()
+    invalidate_tenant(current_user.tenant_id)
     return ok(message="文档已删除")

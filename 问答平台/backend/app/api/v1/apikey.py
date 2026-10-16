@@ -19,6 +19,8 @@ from app.deps import get_db, require_admin, request_id_of
 from app.models import User
 from app.schemas import KeyCreateIn, KeyInfo, KeyCreatedOut
 from app.services.apikey import service
+from app.models import UsageKeySummary
+from sqlalchemy import func, select
 
 router = APIRouter(prefix="/api/v1/apikeys", tags=["API Key"])
 
@@ -114,3 +116,20 @@ def revoke_key(
         key_prefix=key.key_prefix,
     )
     return ok({"id": key.id, "status": key.status}, message="API Key 已吊销")
+
+
+@router.get("/{key_id}/usage", summary="单 Key 用量")
+def key_usage(
+    key_id: int,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    key = service.get_own_key(db, key_id)
+    row = db.execute(
+        select(
+            func.coalesce(func.sum(UsageKeySummary.requests), 0),
+            func.coalesce(func.sum(UsageKeySummary.prompt_tokens), 0),
+            func.coalesce(func.sum(UsageKeySummary.completion_tokens), 0),
+        ).where(UsageKeySummary.key_id == key.id)
+    ).one()
+    return ok({"key_id": key.id, "requests": int(row[0]), "prompt_tokens": int(row[1]), "completion_tokens": int(row[2])})

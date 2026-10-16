@@ -1,0 +1,6 @@
+<template><section class="page split"><form class="panel" @submit.prevent="ask"><p class="eyebrow">ASK A QUESTION</p><textarea v-model.trim="question" rows="8" /><button class="primary" :disabled="loading">{{ loading?'生成中…':'发送问题' }}</button></form><StateWrapper :loading="loading" :error="error" :empty="!answer" empty-text="回答会显示在这里。" @retry="ask"><article class="panel answer"><p class="eyebrow">ANSWER <small>{{ cache }}</small></p><p>{{ answer }}</p><h4>引用来源</h4><ul><li v-for="source in sources" :key="source.id || source.title">{{ source.title || source }}</li><li v-if="!sources.length">当前模型未返回引用来源。</li></ul></article></StateWrapper></section></template>
+<script setup>
+import { ref } from 'vue'; import { request } from '../api'; import StateWrapper from '../components/StateWrapper.vue'
+const question=ref('牛顿第二定律是什么？'),answer=ref(''),sources=ref([]),cache=ref(''),loading=ref(false),error=ref('')
+async function ask(){if(!question.value)return error.value='请输入问题';loading.value=true;error.value='';answer.value='';try{const data=await request('/api/v1/qa/ask',{method:'POST',body:JSON.stringify({question:question.value})});answer.value=data.answer;sources.value=data.sources || data.context || [];cache.value=data.cache_hit?'缓存命中':'模型生成'}catch(e){error.value=e.message}finally{loading.value=false}}
+</script>

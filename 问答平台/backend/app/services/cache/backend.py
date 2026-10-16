@@ -60,3 +60,8 @@ def get_cache() -> InMemoryCache:
 def tenant_key(tenant_id: int, *parts: str) -> str:
     """构造带租户前缀的缓存 key,从源头杜绝跨租户串数据。"""
     return "t:%s:%s" % (tenant_id, ":".join(parts))
+
+
+def invalidate_tenant(tenant_id: int) -> int:
+    """知识库发生变化时清除该租户全部问答缓存。"""
+    return get_cache().delete_prefix(f"t:{tenant_id}:")

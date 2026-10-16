@@ -28,13 +28,30 @@ class SlidingWindowLimiter:
 limiter = SlidingWindowLimiter()
 
 
-def enforce(tenant_id: int, key_id: int | None, per_minute: int | None, per_hour: int | None):
-    """先检查分钟窗口，再检查小时窗口；任一超限都拒绝。"""
-    identity = f"tenant:{tenant_id}:key:{key_id or 'jwt'}"
+def enforce(
+    tenant_id: int,
+    key_id: int | None,
+    per_minute: int | None,
+    per_hour: int | None,
+    *,
+    tenant_per_minute: int | None,
+    tenant_per_hour: int | None,
+):
+    """先限制租户总量，再限制单 Key；JWT 调用也受租户总量保护。"""
+    tenant_identity = f"tenant:{tenant_id}"
+    ok, retry = limiter.check(tenant_identity + ':minute', tenant_per_minute, 60)
+    if not ok:
+        return False, retry, 'tenant-minute'
+    ok, retry = limiter.check(tenant_identity + ':hour', tenant_per_hour, 3600)
+    if not ok:
+        return False, retry, 'tenant-hour'
+    if key_id is None:
+        return True, 0, None
+    identity = f"tenant:{tenant_id}:key:{key_id}"
     ok, retry = limiter.check(identity + ':minute', per_minute, 60)
     if not ok:
-        return False, retry, 'minute'
+        return False, retry, 'key-minute'
     ok, retry = limiter.check(identity + ':hour', per_hour, 3600)
     if not ok:
-        return False, retry, 'hour'
+        return False, retry, 'key-hour'
     return True, 0, None

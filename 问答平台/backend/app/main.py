@@ -20,6 +20,7 @@ from app.middleware.request_id import RequestContextMiddleware
 from app.api.v1 import apikey, health, qa, usage as usage_v1
 from app.routers import admin, auth, kb, tenant, usage
 from app.seed import run_seed
+from app.tasks.summary import scheduler
 
 setup_logging()
 
@@ -29,7 +30,9 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_schema()  # 既有库补列(新增表由 create_all 建)
     run_seed()
+    scheduler.start()
     yield
+    scheduler.stop()
 
 
 # 官方默认从 cdn.jsdelivr.net 加载 Swagger UI，国内访问会白屏，改用 npmmirror 镜像
@@ -57,7 +60,10 @@ app.add_middleware(RequestContextMiddleware)
 @app.exception_handler(BizError)
 async def biz_error_handler(request: Request, exc: BizError):
     # to_dict 会带上 exc.data(如配额超限的 used/limit/reset_at,FR-D3 要求)
-    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    headers = {}
+    if exc.code == "RATE_LIMITED" and exc.data and exc.data.get("retry_after"):
+        headers["Retry-After"] = str(exc.data["retry_after"])
+    return JSONResponse(status_code=exc.status_code, content=exc.to_dict(), headers=headers)
 
 
 @app.exception_handler(HTTPException)
