@@ -60,3 +60,13 @@ def test_kb_write_clears_tenant_cache(env):
     )
     assert response.status_code == 200
     assert get_cache().get(key) is None
+
+
+def test_demo_seed_has_three_business_tenants():
+    """验收演示必须至少覆盖三个有真实语义的业务租户。"""
+    from app.seed import DEMO_ACCOUNTS, KB_SEEDS
+
+    tenants = {item[0] for item in DEMO_ACCOUNTS if item[0] != "platform"}
+    knowledge_tenants = {item[0] for item in KB_SEEDS}
+    assert len(tenants) >= 3
+    assert tenants <= knowledge_tenants
