@@ -52,13 +52,23 @@ ERROR_SPEC: dict[str, tuple[int, str]] = {
     ErrorCode.VALIDATION_ERROR: (422, "请求参数校验失败"),
     ErrorCode.NOT_FOUND: (404, "资源不存在"),
     ErrorCode.INTERNAL_ERROR: (500, "服务器内部错误"),
+    "RATE_LIMITED": (429, "请求频率超过限制，请稍后再试"),
 }
 
 
 class BizError(Exception):
-    """业务异常。可只传错误码,状态码与提示自动取自 ERROR_SPEC。"""
+    """业务异常。可只传错误码,状态码与提示自动取自 ERROR_SPEC。
 
-    def __init__(self, code: str, message: Optional[str] = None, status_code: Optional[int] = None):
+    data:随响应体返回的附加信息(如配额超限时的 used/limit/reset_at,FR-D3 要求)。
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: Optional[str] = None,
+        status_code: Optional[int] = None,
+        data: Optional[dict] = None,
+    ):
         spec = ERROR_SPEC.get(code)
         if spec is not None:
             default_status, default_message = spec
@@ -69,10 +79,57 @@ class BizError(Exception):
             self.status_code = status_code or 400
             self.message = message or code
         self.code = code
+        self.data = data
         super().__init__(self.message)
 
     def to_dict(self) -> dict:
-        return {"code": self.code, "message": self.message, "data": None}
+        return {"code": self.code, "message": self.message, "data": self.data}
+
+
+class QuotaExceededError(BizError):
+    """配额超限(FR-D3)。
+
+    响应体固定包含已用量与重置时间,前端据此提示"何时恢复":
+        {"code": "QUOTA_EXCEEDED", "message": "...", "data": {
+            "used_tokens": int, "limit_tokens": int | None,
+            "used_requests": int, "limit_requests": int | None,
+            "reset_at": "YYYY-MM-DD"}}
+    """
+
+    def __init__(
+        self,
+        *,
+        used_tokens: int,
+        limit_tokens: Optional[int],
+        used_requests: int,
+        limit_requests: Optional[int],
+        reset_at: str,
+        message: Optional[str] = None,
+    ):
+        super().__init__(
+            ErrorCode.QUOTA_EXCEEDED,
+            message,
+            data={
+                "used_tokens": used_tokens,
+                "limit_tokens": limit_tokens,
+                "used_requests": used_requests,
+                "limit_requests": limit_requests,
+                "reset_at": reset_at,
+            },
+        )
+        # 便于调用方直接读属性(不必解析 self.data)
+        self.used_tokens = used_tokens
+        self.limit_tokens = limit_tokens
+        self.used_requests = used_requests
+        self.limit_requests = limit_requests
+        self.reset_at = reset_at
+
+
+class ApiKeyInvalidError(BizError):
+    """API Key 不存在/已吊销/已过期(FR-C3:吊销后调用立即 401)。"""
+
+    def __init__(self, message: Optional[str] = None):
+        super().__init__(ErrorCode.API_KEY_INVALID, message)
 
 
 def error(code: str, message: Optional[str] = None, status_code: Optional[int] = None) -> BizError:
