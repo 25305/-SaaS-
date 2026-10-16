@@ -52,6 +52,7 @@ ERROR_SPEC: dict[str, tuple[int, str]] = {
     ErrorCode.VALIDATION_ERROR: (422, "请求参数校验失败"),
     ErrorCode.NOT_FOUND: (404, "资源不存在"),
     ErrorCode.INTERNAL_ERROR: (500, "服务器内部错误"),
+    "RATE_LIMITED": (429, "请求频率超过限制，请稍后再试"),
 }
 
 
