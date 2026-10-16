@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>问答平台 · 接口测试台</title>
+<style>
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; background: #f5f7fa; color: #333; margin: 0; padding: 24px; }
+  .wrap { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin: 0 0 20px; }
+  .card { background: #fff; border-radius: 10px; padding: 20px; margin: 14px 0; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .card h2 { font-size: 16px; margin: 0 0 6px; }
+  .card p.hint { font-size: 12px; color: #999; margin: 0 0 10px; }
+  label { display: block; font-size: 13px; color: #666; margin: 10px 0 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; font-family: inherit; }
+  button { margin-top: 14px; padding: 10px 22px; font-size: 15px; border: none; border-radius: 6px; background: #2563eb; color: #fff; cursor: pointer; }
+  button:hover { background: #1d4ed8; }
+  button.ghost { background: #6b7280; margin-left: 8px; }
+  button.ghost:hover { background: #4b5563; }
+  button.small { padding: 6px 14px; font-size: 13px; margin-top: 8px; }
+  #token-box { font-size: 13px; background: #f0f9ff; border: 1px dashed #93c5fd; border-radius: 6px; padding: 10px; color: #0369a1; word-break: break-all; }
+  .hidden { display: none; }
+  #result { margin-top: 14px; padding: 14px; border-radius: 8px; font-family: Consolas, "Courier New", monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; display: none; }
+  #result.ok { display: block; background: #f0fdf4; border: 1px solid #86efac; color: #166534; }
+  #result.err { display: block; background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>问答平台 · 接口测试台</h1>
+  <p class="sub">三步走:① 登录 → ② 凭证自动记住 → ③ 查用户 / 退出;管理员登录后还能管理成员和知识库,平台管理员能管理租户</p>
+
+  <div class="card">
+    <h2>① 登录</h2>
+    <p class="hint">演示账号(点击直接填充):
+      platform_admin / Platform@123(平台管理员)·
+      academic_admin / Academic@123(租户管理员)·
+      academic_viewer / Viewer@123(只读成员)·
+      physics_admin / Physics@123(租户管理员)</p>
+    <select id="demo-account" onchange="fillDemo()">
+      <option value="">— 选择一个演示账号 —</option>
+      <option value="platform_admin|Platform@123">平台管理员 platform_admin</option>
+      <option value="academic_admin|Academic@123">学术租户管理员 academic_admin</option>
+      <option value="academic_viewer|Viewer@123">学术只读成员 academic_viewer</option>
+      <option value="physics_admin|Physics@123">物理租户管理员 physics_admin</option>
+    </select>
+    <label>用户名</label>
+    <input id="login-username" value="academic_admin">
+    <label>密码</label>
+    <input id="login-password" type="password" value="Academic@123">
+    <label>租户编码(可不填)</label>
+    <input id="login-tenant" placeholder="如 academic">
+    <button onclick="doLogin()">登 录</button>
+  </div>
+
+  <div class="card">
+    <h2>② 登录凭证(自动保存,无需手动复制)</h2>
+    <div id="token-box">还没有登录</div>
+  </div>
+
+  <div class="card">
+    <h2>③ 登录后能做什么</h2>
+    <p class="hint">凭证会自动带在请求里,直接点按钮</p>
+    <button onclick="doMe()">查看当前用户</button>
+    <button class="ghost" onclick="doLogout()">退出登录</button>
+  </div>
+
+  <div class="card hidden" id="card-members">
+    <h2>④ 成员管理(登录后可见,管理员可操作)</h2>
+    <p class="hint" id="members-hint"></p>
+    <button onclick="listMembers()">刷新成员列表</button>
+    <pre id="member-list" style="font-size:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px;white-space:pre-wrap;">尚未加载</pre>
+    <div id="member-admin-controls" class="hidden">
+      <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+      <p class="hint">以下操作需要管理员身份:</p>
+      <label>新成员用户名(3-50 位)</label>
+      <input id="m-username" placeholder="如 new_member">
+      <label>新成员密码(8-64 位)</label>
+      <input id="m-password" type="password" placeholder="如 NewPass@123">
+      <label>新成员角色</label>
+      <select id="m-role">
+        <option value="readonly">只读成员</option>
+        <option value="admin">租户管理员</option>
+      </select>
+      <button class="small" onclick="createMember()">创建成员</button>
+      <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+      <label>成员 ID(从上面列表里看)</label>
+      <input id="m-id" placeholder="如 5">
+      <label>改角色为</label>
+      <select id="m-role2">
+        <option value="readonly">只读成员</option>
+        <option value="admin">租户管理员</option>
+      </select>
+      <button class="small" onclick="changeRole()">修改角色</button>
+      <label>启用/禁用</label>
+      <select id="m-active">
+        <option value="true">启用</option>
+        <option value="false">禁用</option>
+      </select>
+      <button class="small" onclick="toggleActive()">提交状态</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="card-tenants">
+    <h2>⑤ 租户管理(仅平台管理员可见)</h2>
+    <button onclick="listTenants()">刷新租户列表</button>
+    <pre id="tenant-list" style="font-size:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px;white-space:pre-wrap;">尚未加载</pre>
+    <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+    <label>新租户编码(2-50 位)</label>
+    <input id="t-code" placeholder="如 library">
+    <label>新租户名称</label>
+    <input id="t-name" placeholder="如 图书馆">
+    <label>首个管理员用户名</label>
+    <input id="t-admin" placeholder="如 library_admin">
+    <label>首个管理员密码(8-64 位)</label>
+    <input id="t-pass" type="password" placeholder="如 Library@123">
+    <button class="small" onclick="createTenant()">创建租户</button>
+    <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+    <label>租户 ID(从上面列表里看)</label>
+    <input id="t-id" placeholder="如 4">
+    <button class="small" onclick="setTenantActive(false)">停用该租户</button>
+    <button class="small ghost" onclick="setTenantActive(true)">启用该租户</button>
+  </div>
+
+  <div class="card hidden" id="card-kb">
+    <h2>⑥ 知识库(登录后可见,数据按租户隔离)</h2>
+    <p class="hint" id="kb-hint"></p>
+    <button onclick="listKbs()">刷新知识库列表</button>
+    <pre id="kb-list" style="font-size:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px;white-space:pre-wrap;">尚未加载</pre>
+    <div id="kb-admin-controls" class="hidden">
+      <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+      <p class="hint">以下操作需要管理员身份:</p>
+      <label>新知识库名称</label>
+      <input id="kb-name" placeholder="如 计算机基础">
+      <label>新知识库简介(可选)</label>
+      <input id="kb-desc" placeholder="如 关于计算机基础的问答资料">
+      <button class="small" onclick="createKb()">创建知识库</button>
+      <hr style="border:none;border-top:1px dashed #ddd;margin:14px 0;">
+      <label>知识库 ID(从上面列表里看)</label>
+      <input id="kb-id" placeholder="如 1">
+      <button class="small" onclick="listDocs()">查看该库文档</button>
+      <pre id="doc-list" style="font-size:12px;background:#fafafa;border:1px solid #eee;border-radius:6px;padding:10px;white-space:pre-wrap;">尚未加载</pre>
+      <label>文档标题(添加文档用)</label>
+      <input id="doc-title" placeholder="如 借阅须知">
+      <label>文档正文(添加文档用)</label>
+      <textarea id="doc-content" rows="4" placeholder="如 本科生单次最多借阅 10 册,借期 30 天……"></textarea>
+      <button class="small" onclick="addDoc()">向该库添加文档</button>
+      <label>文档 ID(删除文档用)</label>
+      <input id="doc-id" placeholder="如 1">
+      <button class="small" onclick="deleteDoc()">删除该文档</button>
+      <button class="small ghost" onclick="deleteKb()">删除该知识库(连同文档)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>没有账号?注册一个</h2>
+    <p class="hint">注册成功后会创建新租户,并把你设为该租户管理员</p>
+    <label>用户名(3-50 位)</label>
+    <input id="reg-username" placeholder="如 my_admin">
+    <label>密码(8-64 位)</label>
+    <input id="reg-password" type="password" placeholder="如 MyPass@123">
+    <label>租户编码(必填)</label>
+    <input id="reg-tenant" placeholder="如 my_tenant">
+    <button onclick="doRegister()">注 册</button>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<script>
+var token = null;
+var currentUser = null;
+
+// 常见错误码 → 通俗解释
+var CODE_HINTS = {
+  "INVALID_CREDENTIALS": "用户名或密码不对,请检查后重试",
+  "TENANT_EXISTS": "这个租户编码已经被注册过了,换一个",
+  "TENANT_CODE_RESERVED": "该租户编码是系统保留的(platform),换一个",
+  "TENANT_NOT_FOUND": "租户不存在,检查 ID 对不对",
+  "USERNAME_EXISTS": "这个用户名已经被占用了,换一个",
+  "USER_NOT_FOUND": "成员不存在,检查 ID 对不对",
+  "UNAUTHORIZED": "还没有登录,先去第①步点【登录】",
+  "INVALID_TOKEN": "登录凭证失效了(可能已退出或过期),请重新登录",
+  "ACCOUNT_DISABLED": "该账号已被禁用,请联系管理员",
+  "TENANT_DISABLED": "该租户已被平台停用,请联系平台管理员",
+  "FORBIDDEN": "没有权限做这个操作(只读成员不能管理,租户管理员不能管租户)",
+  "VALIDATION_ERROR": "填写的内容不符合要求,检查用户名/密码长度",
+  "KB_NOT_FOUND": "知识库不存在(别的租户的知识库访问时也会返回同样的提示)",
+  "DOC_NOT_FOUND": "文档不存在(别的租户的文档访问时也会返回同样的提示)"
+};
+
+function showResult(data, httpStatus) {
+  var box = document.getElementById("result");
+  var ok = data && data.code === 0;
+  box.className = ok ? "ok" : "err";
+  var hint = !ok && data && CODE_HINTS[data.code] ? CODE_HINTS[data.code] + "\n\n" : "";
+  box.textContent = (ok ? "✔ " : "✘ ") + "HTTP " + httpStatus + "\n" + hint + JSON.stringify(data, null, 2);
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function call(path, method, body) {
+  var opts = { method: method, headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+  return fetch(path, opts)
+    .then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    })
+    .catch(function () {
+      return { status: 0, data: { code: "NETWORK", message: "请求失败,服务器可能没启动" } };
+    });
+}
+
+function setToken(t) {
+  token = t;
+  document.getElementById("token-box").textContent = t
+    ? "已登录 ✔  凭证: " + t.slice(0, 24) + "……(共 " + t.length + " 字符)"
+    : "还没有登录";
+}
+
+function renderCards() {
+  var loggedIn = !!token;
+  var isAdmin = currentUser && (currentUser.role === "admin" || currentUser.role === "super_admin");
+  var isSuper = currentUser && currentUser.is_super_admin;
+
+  document.getElementById("card-members").classList.toggle("hidden", !loggedIn);
+  document.getElementById("card-tenants").classList.toggle("hidden", !isSuper);
+  document.getElementById("member-admin-controls").classList.toggle("hidden", !isAdmin);
+  document.getElementById("card-kb").classList.toggle("hidden", !loggedIn);
+  document.getElementById("kb-admin-controls").classList.toggle("hidden", !isAdmin);
+
+  var hint = document.getElementById("members-hint");
+  if (loggedIn) {
+    hint.textContent = isAdmin
+      ? "你当前是管理员,可以查看成员、创建成员、修改角色、禁用成员"
+      : "你当前是只读成员,只能查看列表;管理操作需要管理员权限";
+  }
+  var kbHint = document.getElementById("kb-hint");
+  if (loggedIn) {
+    kbHint.textContent = isAdmin
+      ? "你只能看到本租户自己的知识库和文档,别的租户看不到你的,你也看不到他们的"
+      : "你当前是只读成员,可以查看本租户的知识库;增删改需要管理员权限";
+  }
+}
+
+function fillDemo() {
+  var v = document.getElementById("demo-account").value;
+  if (!v) return;
+  var parts = v.split("|");
+  document.getElementById("login-username").value = parts[0];
+  document.getElementById("login-password").value = parts[1];
+}
+
+function doLogin() {
+  var body = {
+    username: document.getElementById("login-username").value.trim(),
+    password: document.getElementById("login-password").value
+  };
+  var tenant = document.getElementById("login-tenant").value.trim();
+  if (tenant) body.tenant_code = tenant;
+  if (!body.username || !body.password) {
+    showResult({ code: "VALIDATION_ERROR", message: "用户名和密码不能为空" }, 0);
+    return;
+  }
+  call("/api/auth/login", "POST", body).then(function (r) {
+    if (r.data.code === 0) {
+      setToken(r.data.data.access_token);
+      currentUser = null;
+      renderCards();
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function doMe() {
+  if (!token) {
+    showResult({ code: "UNAUTHORIZED", message: "请先登录" }, 401);
+    return;
+  }
+  call("/api/auth/me", "GET").then(function (r) {
+    if (r.data.code === 0) {
+      currentUser = r.data.data;
+      renderCards();
+      listKbs();
+      if (currentUser.role === "admin" || currentUser.role === "super_admin") listMembers();
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function doLogout() {
+  if (!token) {
+    showResult({ code: "UNAUTHORIZED", message: "请先登录" }, 401);
+    return;
+  }
+  call("/api/auth/logout", "POST").then(function (r) {
+    if (r.data.code === 0) {
+      setToken(null);
+      currentUser = null;
+      renderCards();
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function doRegister() {
+  var body = {
+    username: document.getElementById("reg-username").value.trim(),
+    password: document.getElementById("reg-password").value,
+    tenant_code: document.getElementById("reg-tenant").value.trim()
+  };
+  if (!body.username || !body.password || !body.tenant_code) {
+    showResult({ code: "VALIDATION_ERROR", message: "用户名、密码、租户编码都要填" }, 0);
+    return;
+  }
+  call("/api/auth/register", "POST", body).then(function (r) {
+    showResult(r.data, r.status);
+  });
+}
+
+// ---------- ④ 成员管理 ----------
+function listMembers() {
+  call("/api/tenant/users", "GET").then(function (r) {
+    if (r.data.code === 0) {
+      document.getElementById("member-list").textContent =
+        r.data.data.map(function (u) {
+          return "ID " + u.id + "  " + u.username + "  [" + u.role + "]  " + (u.is_active ? "启用" : "禁用");
+        }).join("\n") || "(空)";
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function createMember() {
+  var body = {
+    username: document.getElementById("m-username").value.trim(),
+    password: document.getElementById("m-password").value,
+    role: document.getElementById("m-role").value
+  };
+  call("/api/tenant/users", "POST", body).then(function (r) {
+    if (r.data.code === 0) listMembers();
+    showResult(r.data, r.status);
+  });
+}
+
+function changeRole() {
+  var id = document.getElementById("m-id").value.trim();
+  call("/api/tenant/users/" + id, "PATCH", { role: document.getElementById("m-role2").value }).then(function (r) {
+    if (r.data.code === 0) listMembers();
+    showResult(r.data, r.status);
+  });
+}
+
+function toggleActive() {
+  var id = document.getElementById("m-id").value.trim();
+  call("/api/tenant/users/" + id, "PATCH", { is_active: document.getElementById("m-active").value === "true" }).then(function (r) {
+    if (r.data.code === 0) listMembers();
+    showResult(r.data, r.status);
+  });
+}
+
+// ---------- ⑤ 租户管理(超管) ----------
+function listTenants() {
+  call("/api/admin/tenants", "GET").then(function (r) {
+    if (r.data.code === 0) {
+      document.getElementById("tenant-list").textContent =
+        r.data.data.map(function (t) {
+          return "ID " + t.id + "  " + t.code + "(" + t.name + ")  成员 " + t.user_count + "  " + (t.is_active ? "启用" : "停用");
+        }).join("\n") || "(空)";
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function createTenant() {
+  var body = {
+    code: document.getElementById("t-code").value.trim(),
+    name: document.getElementById("t-name").value.trim(),
+    admin_username: document.getElementById("t-admin").value.trim(),
+    admin_password: document.getElementById("t-pass").value
+  };
+  call("/api/admin/tenants", "POST", body).then(function (r) {
+    if (r.data.code === 0) listTenants();
+    showResult(r.data, r.status);
+  });
+}
+
+function setTenantActive(active) {
+  var id = document.getElementById("t-id").value.trim();
+  call("/api/admin/tenants/" + id + (active ? "/enable" : "/disable"), "POST").then(function (r) {
+    if (r.data.code === 0) listTenants();
+    showResult(r.data, r.status);
+  });
+}
+
+// ---------- ⑥ 知识库 ----------
+function listKbs() {
+  call("/api/kb/", "GET").then(function (r) {
+    if (r.data.code === 0) {
+      document.getElementById("kb-list").textContent =
+        r.data.data.map(function (kb) {
+          return "ID " + kb.id + "  " + kb.name + "  文档 " + kb.doc_count + " 篇" + (kb.description ? "  (" + kb.description + ")" : "");
+        }).join("\n") || "(还没有知识库)";
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function createKb() {
+  var body = { name: document.getElementById("kb-name").value.trim() };
+  var desc = document.getElementById("kb-desc").value.trim();
+  if (desc) body.description = desc;
+  if (!body.name) {
+    showResult({ code: "VALIDATION_ERROR", message: "知识库名称不能为空" }, 0);
+    return;
+  }
+  call("/api/kb/", "POST", body).then(function (r) {
+    if (r.data.code === 0) listKbs();
+    showResult(r.data, r.status);
+  });
+}
+
+function listDocs() {
+  var id = document.getElementById("kb-id").value.trim();
+  call("/api/kb/" + id + "/docs", "GET").then(function (r) {
+    if (r.data.code === 0) {
+      document.getElementById("doc-list").textContent =
+        r.data.data.map(function (d) {
+          return "ID " + d.id + "  " + d.title + "\n" + d.content;
+        }).join("\n\n") || "(该库还没有文档)";
+    }
+    showResult(r.data, r.status);
+  });
+}
+
+function addDoc() {
+  var id = document.getElementById("kb-id").value.trim();
+  var body = {
+    title: document.getElementById("doc-title").value.trim(),
+    content: document.getElementById("doc-content").value.trim()
+  };
+  if (!body.title || !body.content) {
+    showResult({ code: "VALIDATION_ERROR", message: "文档标题和正文都要填" }, 0);
+    return;
+  }
+  call("/api/kb/" + id + "/docs", "POST", body).then(function (r) {
+    if (r.data.code === 0) listDocs();
+    showResult(r.data, r.status);
+  });
+}
+
+function deleteDoc() {
+  var id = document.getElementById("kb-id").value.trim();
+  var docId = document.getElementById("doc-id").value.trim();
+  call("/api/kb/" + id + "/docs/" + docId, "DELETE").then(function (r) {
+    if (r.data.code === 0) listDocs();
+    showResult(r.data, r.status);
+  });
+}
+
+function deleteKb() {
+  var id = document.getElementById("kb-id").value.trim();
+  if (!confirm("确定删除 ID " + id + " 的知识库吗?里面的文档会一起删除")) return;
+  call("/api/kb/" + id, "DELETE").then(function (r) {
+    if (r.data.code === 0) listKbs();
+    showResult(r.data, r.status);
+  });
+}
+</script>
+</body>
+</html>
