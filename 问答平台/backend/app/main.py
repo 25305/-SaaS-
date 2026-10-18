@@ -17,9 +17,10 @@ from app.db.base import Base
 from app.db.schema import ensure_schema
 from app.db.session import engine
 from app.middleware.request_id import RequestContextMiddleware
-from app.api.v1 import apikey, health, qa, usage as usage_v1
+from app.api.v1 import apikey, billing, dashboard, health, qa, usage as usage_v1
 from app.routers import admin, auth, kb, tenant, usage
 from app.seed import run_seed
+from app.tasks import summary as summary_task
 
 setup_logging()
 
@@ -29,7 +30,11 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_schema()  # 既有库补列(新增表由 create_all 建)
     run_seed()
+    # 模块 F(FR-F6):后台定时把 usage_record 汇总进 usage_summary,
+    # 使看板/账单接口只读汇总表、耗时恒定。interval<=0 时不启动(见 config.py)。
+    summary_task.start_scheduler()
     yield
+    summary_task.stop_scheduler()
 
 
 # 官方默认从 cdn.jsdelivr.net 加载 Swagger UI，国内访问会白屏，改用 npmmirror 镜像
@@ -57,7 +62,15 @@ app.add_middleware(RequestContextMiddleware)
 @app.exception_handler(BizError)
 async def biz_error_handler(request: Request, exc: BizError):
     # to_dict 会带上 exc.data(如配额超限的 used/limit/reset_at,FR-D3 要求)
-    return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    payload = exc.to_dict()
+    headers: dict[str, str] = {}
+    # FR-E1:限流必须同时给出"重试建议"——异常响应体里带 retry_after,
+    # 但 raise 会丢弃端点上的 Response 对象,所以在这里补回标准 Retry-After 头。
+    if exc.code == "RATE_LIMITED" and isinstance(exc.data, dict):
+        retry_after = exc.data.get("retry_after") or exc.data.get("retry_after_seconds")
+        if retry_after:
+            headers["Retry-After"] = str(retry_after)
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=headers or None)
 
 
 @app.exception_handler(HTTPException)
@@ -120,3 +133,6 @@ app.include_router(apikey.router)
 app.include_router(usage_v1.router)
 app.include_router(qa.router)
 app.include_router(health.router)
+# 模块 F:用量看板(只读 usage_summary)与账单导出/可追溯校验
+app.include_router(dashboard.router)
+app.include_router(billing.router)

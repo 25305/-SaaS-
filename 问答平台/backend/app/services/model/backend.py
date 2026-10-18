@@ -23,7 +23,9 @@ async def probe_model() -> dict:
     if settings.MODEL_API_KEY:
         headers["Authorization"] = "Bearer " + settings.MODEL_API_KEY
     async with httpx.AsyncClient(timeout=settings.MODEL_TIMEOUT_SECONDS) as client:
-        resp = await client.get(settings.MODEL_BASE_URL.rstrip("/") + "/health", headers=headers)
+        # 探针走 OpenAI 兼容面里的 /models(与 /chat/completions 同一协议族):
+        # 真实上游(如阿里云百炼)没有 /health,而 /models 在兼容实现里普遍存在。
+        resp = await client.get(settings.MODEL_BASE_URL.rstrip("/") + "/models", headers=headers)
         # 只有 2xx 能证明探针可用；401/404/5xx 均为不可用。
         if not 200 <= resp.status_code < 300:
             return {"status": "down", "http_status": resp.status_code}

@@ -6,6 +6,7 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.core.errors import BizError, ERROR_SPEC, ErrorCode
 from app.core.logging import JsonFormatter
 from app.main import app
@@ -13,7 +14,10 @@ from app.api.v1 import health
 from app.services.cache.backend import get_cache, tenant_key
 
 
-def test_health_unconfigured_model_returns_degraded():
+def test_health_unconfigured_model_returns_degraded(monkeypatch):
+    # 显式清空上游地址:本机 .env 可能已配置真实模型(且会真实发起网络请求),
+    # 测试结果不得依赖开发环境的 .env
+    monkeypatch.setattr(settings, "MODEL_BASE_URL", "")
     c = TestClient(app)
     response = c.get("/health")
     assert response.status_code == 503

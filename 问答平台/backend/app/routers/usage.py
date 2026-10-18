@@ -1,19 +1,18 @@
-"""用量明细、看板和账单导出。"""
+"""兼容接口:用量明细、用量汇总与缓存清理。
 
-import csv
-import io
-from datetime import datetime, timedelta
+历史遗留的无界全表扫描接口(/api/usage/dashboard、/api/usage/billing/export[.xlsx])
+已移除,前端模块 H 改用有界的 /api/v1/dashboard 与 /api/v1/billing
+(见 docs/接口文档.md §9/§10,满足 FR-F6「禁止全表扫描」)。
+"""
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.response import ok
 from app.deps import get_current_user, get_db
-from app.models import LlmUsageRecord, UsageRecord, User
+from app.models import UsageRecord, User
 from app.services.usage import summarize
-from app.services.metering.service import usage_by_key
 from app.services.cache.backend import get_cache
 
 router = APIRouter(prefix="/api/usage", tags=["用量"])
@@ -47,60 +46,6 @@ def summary(
     db: Session = Depends(get_db),
 ):
     return ok(summarize(db))
-
-
-def _dashboard(db: Session, days: int) -> dict:
-    since = datetime.now() - timedelta(days=days)
-    rows = db.execute(select(LlmUsageRecord).where(LlmUsageRecord.created_at >= since).order_by(LlmUsageRecord.created_at)).scalars().all()
-    total = len([r for r in rows if r.status in ('success', 'error')])
-    latencies = [r.latency_ms for r in rows if r.latency_ms > 0]
-    return {
-        'summary': {
-            'total_requests': total,
-            'prompt_tokens': sum(r.prompt_tokens for r in rows),
-            'completion_tokens': sum(r.completion_tokens for r in rows),
-            'avg_latency_ms': round(sum(latencies) / len(latencies), 2) if latencies else 0,
-            'p95_latency_ms': sorted(latencies)[max(0, int(len(latencies) * .95) - 1)] if latencies else 0,
-            'cache_hit_rate': round(sum(1 for r in rows if r.cache_hit) / total * 100, 2) if total else 0,
-            'errors': sum(1 for r in rows if r.status == 'error'),
-            'quota_rejected': sum(1 for r in rows if r.status == 'quota_rejected'),
-        },
-        'by_key': usage_by_key(db, since),
-        'trend': [{'date': r.created_at.date().isoformat(), 'requests': sum(1 for x in rows if x.created_at.date() == r.created_at.date() and x.status in ('success', 'error'))} for r in rows[::max(1, len(rows)//30 or 1)]],
-    }
-
-
-@router.get('/dashboard', summary='看板数据')
-def dashboard(days: int = Query(30, ge=1, le=365), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return ok(_dashboard(db, days))
-
-
-@router.get('/billing/export', summary='账单 CSV 导出')
-def billing_export(days: int = Query(30, ge=1, le=365), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    since = datetime.now() - timedelta(days=days)
-    rows = db.execute(select(LlmUsageRecord).where(LlmUsageRecord.created_at >= since).order_by(LlmUsageRecord.id)).scalars().all()
-    output = io.StringIO(newline='')
-    writer = csv.writer(output)
-    writer.writerow(['id', 'created_at', 'request_id', 'key_id', 'model', 'status', 'prompt_tokens', 'completion_tokens', 'latency_ms', 'cache_hit'])
-    for row in rows:
-        writer.writerow([row.id, row.created_at.isoformat(), row.request_id, row.key_id, row.model, row.status, row.prompt_tokens, row.completion_tokens, row.latency_ms, row.cache_hit])
-    return StreamingResponse(iter([output.getvalue().encode('utf-8-sig')]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="billing.csv"'})
-
-
-@router.get('/billing/export.xlsx', summary='账单 Excel 导出')
-def billing_export_xlsx(days: int = Query(30, ge=1, le=365), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    try:
-        from openpyxl import Workbook
-    except ImportError:
-        return Response('请先安装 openpyxl', status_code=503, media_type='text/plain')
-    since = datetime.now() - timedelta(days=days)
-    rows = db.execute(select(LlmUsageRecord).where(LlmUsageRecord.created_at >= since).order_by(LlmUsageRecord.id)).scalars().all()
-    book = Workbook(); sheet = book.active; sheet.title = 'billing'
-    sheet.append(['id', 'created_at', 'request_id', 'key_id', 'model', 'status', 'prompt_tokens', 'completion_tokens', 'latency_ms', 'cache_hit'])
-    for row in rows:
-        sheet.append([row.id, row.created_at.isoformat(), row.request_id, row.key_id, row.model, row.status, row.prompt_tokens, row.completion_tokens, row.latency_ms, row.cache_hit])
-    data = io.BytesIO(); book.save(data); data.seek(0)
-    return StreamingResponse(data, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': 'attachment; filename="billing.xlsx"'})
 
 
 @router.post('/cache/clear', summary='清理本租户缓存')

@@ -15,4 +15,18 @@ venv/
 .vscode/
 *.swp
 
+# 密钥与本地环境(FR-I3:仓库内不得出现明文密钥)
+# .env.example 是键位样例,需要入库;真实 .env 一律不入库
+.env
+.env.local
+.env.*.local
+
+# 前端依赖与产物
+node_modules/
+frontend/dist/
+
+# 运行期输出
+*.log
+.screenshots/
+
 # 说明：backend/qa.db 与 backend/backups/ 是隔离验证的交付证据，保留在版本库中。

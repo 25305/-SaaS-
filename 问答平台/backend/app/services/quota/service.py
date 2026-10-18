@@ -84,10 +84,23 @@ def _day_floor(day: date) -> datetime:
 def ensure_current_period(db: Session, tenant_id: int) -> Tenant:
     """惰性周期重置:把"本月是否已重置"变成请求路径上的幂等检查。
 
-    并发安全:两个请求同时跨月时,`SELECT ... FOR UPDATE` 把两个事务串行化,
-    后到者读到前者的结果,不会重复重置(仅 MySQL 生效;SQLite 无行锁,但开发库
-    的写事务本身是串行的,不会出现重复重置,故对 SQLite 跳过该子句)。
+    并发安全:仅在**确实需要重置**时才用 `SELECT ... FOR UPDATE` 把并发事务串行化,
+    后到者读到前者的结果,不会重复重置(仅 MySQL 生效;SQLite 无行锁,但开发库的
+    写事务本身串行,故跳过该子句)。
+
+    性能取舍:行锁会一直持有到请求结尾的提交(即模型调用**之后**),
+    若在"当月无需重置"的常见路径上也加锁,会把同一租户的并发请求串行化,
+    吞吐随并发线性下降。因此先用无锁读走快速路径,只有跨月需重置时才加锁。
     """
+    tenant = db.get(Tenant, tenant_id)
+    today = date.today()
+    stored = tenant.period_start if tenant is not None else None
+    if tenant is not None and stored is not None and (
+        (stored.year, stored.month) == (today.year, today.month)
+    ):
+        return tenant  # 当月已对齐:无锁快速路径,不阻塞同租户并发
+
+    # 需要重置(或租户不存在):此时才加行锁;不存在则 scalar_one 仍抛 NoResultFound
     stmt = select(Tenant).where(Tenant.id == tenant_id)
     if db.get_bind().dialect.name != "sqlite":
         stmt = stmt.with_for_update()

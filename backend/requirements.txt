@@ -1,9 +1,0 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
-PyJWT==2.10.1
-sqlalchemy==2.0.36
-httpx==0.28.1
-pytest==8.3.4
-openpyxl==3.1.5

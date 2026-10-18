@@ -41,6 +41,14 @@ from app.models import ApiKey
 router = APIRouter(prefix="/api/v1/qa", tags=["问答"])
 
 QUOTA_WARNING_HEADER = "X-Quota-Warning"
+# 引用来源展示上限:每条截断为若干字符,避免把整篇语料返给前端(FR-H5)
+SOURCE_LIMIT = 3
+SOURCE_CHARS = 120
+
+
+def _excerpts(context) -> list[str]:
+    """把检索到的上下文片段截断为可展示的引用来源。"""
+    return [chunk.strip()[:SOURCE_CHARS] for chunk in context[:SOURCE_LIMIT] if chunk and chunk.strip()]
 
 
 @router.post("/ask", summary="知识库问答(配额预检 → 缓存 → 模型)")
@@ -54,16 +62,17 @@ def ask(
     question = payload.question.strip()
 
     # 限流必须在模型调用前执行；配额检查仍紧随其后。
-    if ctx.key_id is not None:
-        key = db.get(ApiKey, ctx.key_id)
-        allowed, retry_after, window = enforce(
-            ctx.tenant_id, ctx.key_id,
-            key.rate_limit_per_minute if key else None,
-            key.rate_limit_per_hour if key else None,
-        )
-        if not allowed:
-            response.headers['Retry-After'] = str(retry_after)
-            raise BizError('RATE_LIMITED', f'{window} 频率已超过限制', 429, {'retry_after': retry_after})
+    # 维度一(Key):走 API Key 时以 Key 自身阈值为准;
+    # 维度二(租户):JWT 登录态调用没有 Key,回落到租户兜底阈值(FR-E1 双维度)。
+    # Retry-After 由 main.py 的 BizError 处理器统一补回首部。
+    key = db.get(ApiKey, ctx.key_id) if ctx.key_id is not None else None
+    allowed, retry_after, window = enforce(
+        ctx.tenant_id, ctx.key_id,
+        key.rate_limit_per_minute if key else settings.TENANT_RATE_LIMIT_PER_MINUTE,
+        key.rate_limit_per_hour if key else settings.TENANT_RATE_LIMIT_PER_HOUR,
+    )
+    if not allowed:
+        raise BizError('RATE_LIMITED', f'{window} 频率已超过限制', 429, {'retry_after': retry_after})
 
     # ── 第 1 步:配额预检(此时绝不调用模型) ──────────────────────────
     quota = quota_service.check(db, ctx)
@@ -99,6 +108,7 @@ def ask(
     cache_key = tenant_key(ctx.tenant_id, "qa", question)
     cached = cache.get(cache_key)
     if cached is not None:
+        response.headers["X-Cache"] = "HIT"
         metering.record_cache_hit(db, ctx, model=model)
         logger.info(
             "qa_cache_hit",
@@ -106,7 +116,9 @@ def ask(
                               "key_prefix": ctx.key_prefix, "model": model}},
         )
         return ok({
-            "answer": cached,
+            "answer": cached["answer"],
+            # 缓存的是"答案 + 引用来源"整体,保证命中时前端仍能展示来源(FR-H5)
+            "sources": cached.get("sources", []),
             "model": model,
             "cache_hit": True,
             "tokens": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -114,6 +126,8 @@ def ask(
         })
 
     # ── 第 3 步:调模型(只有到这里才产生模型调用) ────────────────────
+    # 未命中缓存:回 X-Cache=MISS,便于演示/测试断言"租户 B 不命中租户 A 的缓存"(FR-E3)
+    response.headers["X-Cache"] = "MISS"
     started = time.perf_counter()
     try:
         completion, context = rag.answer(db, question=question, model=model)
@@ -149,10 +163,13 @@ def ask(
         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
         latency_ms=latency_ms,
     )
-    cache.set(cache_key, completion.answer, ttl=settings.QA_CACHE_TTL_SECONDS)
+    sources = _excerpts(context)
+    cache.set(cache_key, {"answer": completion.answer, "sources": sources},
+              ttl=settings.QA_CACHE_TTL_SECONDS)
 
     return ok({
         "answer": completion.answer,
+        "sources": sources,
         "model": completion.model,
         "model_provider": completion.provider,
         "cache_hit": False,
