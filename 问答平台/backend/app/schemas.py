@@ -78,6 +78,12 @@ class TenantQuotaUpdate(BaseModel):
     )
 
 
+class TenantQuotaUpdate(BaseModel):
+    quota_monthly_tokens: Optional[int] = Field(default=None, ge=0)
+    quota_monthly_requests: Optional[int] = Field(default=None, ge=0)
+    overage_policy: Literal["reject", "soft_warn"] = Field(default="reject")
+
+
 class KBCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100, description="知识库名称")
     description: Optional[str] = Field(default=None, max_length=500, description="简介（可选）")

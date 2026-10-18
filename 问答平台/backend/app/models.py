@@ -223,3 +223,31 @@ class UsageSummary(TenantMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now
     )
+
+
+class UsageKeySummary(TenantMixin, Base):
+    """按租户、日期、API Key 汇总，供看板的 Key 图表读取。"""
+
+    __tablename__ = "usage_key_summary"
+    __table_args__ = (UniqueConstraint("tenant_id", "bucket_date", "key_id", name="uk_usage_key_summary"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    bucket_date: Mapped[date] = mapped_column(Date, index=True)
+    # 0 代表 JWT 登录态调用，避免 SQLite 对 NULL 唯一约束的语义差异。
+    key_id: Mapped[int] = mapped_column(Integer, default=0)
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    completion_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class UsageLatencyBucket(TenantMixin, Base):
+    """按日保存延迟直方图，避免看板查询时回扫 usage_record。"""
+
+    __tablename__ = "usage_latency_bucket"
+    __table_args__ = (UniqueConstraint("tenant_id", "bucket_date", "bucket", name="uk_usage_latency_bucket"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    bucket_date: Mapped[date] = mapped_column(Date, index=True)
+    bucket: Mapped[str] = mapped_column(String(32))
+    count: Mapped[int] = mapped_column(Integer, default=0)

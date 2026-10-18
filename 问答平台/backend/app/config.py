@@ -50,6 +50,9 @@ class Settings:
 
     # ---------------- 问答缓存(模块 D) ----------------
     QA_CACHE_TTL_SECONDS: int = int(os.getenv("QA_CACHE_TTL_SECONDS", "300"))
+    # 默认租户总限流。单 Key 限流由 ApiKey 字段覆盖/补充。
+    TENANT_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("TENANT_RATE_LIMIT_PER_MINUTE", "120"))
+    TENANT_RATE_LIMIT_PER_HOUR: int = int(os.getenv("TENANT_RATE_LIMIT_PER_HOUR", "3000"))
 
     # ---------------- 限流(模块 E,FR-E1) ----------------
     # 租户维度的兜底阈值:API Key 自带 rate_limit_* 时以 Key 为准;JWT 登录态调用走这里。

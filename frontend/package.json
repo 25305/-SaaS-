@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build" },
+  "scripts": { "dev": "vite", "build": "vite build", "verify:d": "node scripts/verify-d-module.mjs" },
   "dependencies": { "@vitejs/plugin-vue": "latest", "vite": "latest", "vue": "latest", "vue-router": "^4.5.0", "echarts": "latest" },
   "devDependencies": {}
 }

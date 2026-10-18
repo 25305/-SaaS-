@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.context import RequestContext
 from app.core.logging import logger
-from app.models import LlmUsageRecord, UsageSummary
+from app.models import LlmUsageRecord, UsageKeySummary, UsageLatencyBucket, UsageSummary
 
 STATUS_SUCCESS = "success"
 STATUS_ERROR = "error"
@@ -60,8 +60,11 @@ def _insert(
     )
     try:
         db.add(record)
-        db.flush()  # 让本次流水参与接下来的聚合,并与聚合写入合并为一次提交
-        refresh_summary(db, ctx.tenant_id, date.today())
+        db.flush()
+        # 请求路径只做 O(1) 增量写入，完整重算由后台任务异步完成。
+        # 这样问答延迟不会随当日 usage_record 数量线性增长。
+        apply_record_delta(db, record)
+        db.commit()
     except Exception:
         db.rollback()
         logger.error(
@@ -139,6 +142,57 @@ def _percentile(values: list[int], ratio: float) -> int:
     return int(ordered[min(rank, len(ordered) - 1)])
 
 
+def _latency_bucket(value: int) -> str:
+    if value < 500: return "0-500ms"
+    if value < 1000: return "500ms-1s"
+    if value < 2000: return "1s-2s"
+    if value < 5000: return "2s-5s"
+    return "5s+"
+
+
+def apply_record_delta(db: Session, record: LlmUsageRecord) -> None:
+    """把单条新流水增量写入物化表；不读取整日流水。"""
+    day = record.created_at.date()
+    summary = db.execute(select(UsageSummary).where(UsageSummary.bucket_date == day)).scalar_one_or_none()
+    if summary is None:
+        summary = UsageSummary(
+            tenant_id=record.tenant_id, bucket_date=day, requests=0, success=0, errors=0,
+            prompt_tokens=0, completion_tokens=0, avg_latency_ms=0, p95_latency_ms=0, cache_hits=0,
+        )
+        db.add(summary); db.flush()
+    consumes = record.status in QUOTA_CONSUMING_STATUSES
+    previous_requests = summary.requests
+    if consumes:
+        summary.requests += 1
+    if record.status == STATUS_SUCCESS: summary.success += 1
+    if record.status == STATUS_ERROR: summary.errors += 1
+    summary.prompt_tokens += record.prompt_tokens
+    summary.completion_tokens += record.completion_tokens
+    if record.cache_hit: summary.cache_hits += 1
+    if record.latency_ms > 0:
+        denominator = max(1, previous_requests + (1 if consumes else 0))
+        summary.avg_latency_ms = round((summary.avg_latency_ms * max(0, denominator - 1) + record.latency_ms) / denominator)
+        summary.p95_latency_ms = max(summary.p95_latency_ms, record.latency_ms)
+    key_id = record.key_id or 0
+    key_summary = db.execute(select(UsageKeySummary).where(UsageKeySummary.bucket_date == day, UsageKeySummary.key_id == key_id)).scalar_one_or_none()
+    if key_summary is None:
+        key_summary = UsageKeySummary(
+            tenant_id=record.tenant_id, bucket_date=day, key_id=key_id,
+            requests=0, prompt_tokens=0, completion_tokens=0, cache_hits=0,
+        )
+        db.add(key_summary)
+    if consumes: key_summary.requests += 1
+    key_summary.prompt_tokens += record.prompt_tokens
+    key_summary.completion_tokens += record.completion_tokens
+    if record.cache_hit: key_summary.cache_hits += 1
+    label = _latency_bucket(record.latency_ms)
+    bucket = db.execute(select(UsageLatencyBucket).where(UsageLatencyBucket.bucket_date == day, UsageLatencyBucket.bucket == label)).scalar_one_or_none()
+    if bucket is None:
+        bucket = UsageLatencyBucket(tenant_id=record.tenant_id, bucket_date=day, bucket=label, count=0)
+        db.add(bucket)
+    bucket.count += 1
+
+
 def refresh_summary(db: Session, tenant_id: int, bucket_date: date) -> UsageSummary:
     """重算某租户某日的聚合并 UPSERT。调用方 Session 必须已带租户上下文。"""
     start, end = _day_bounds(bucket_date)
@@ -184,6 +238,59 @@ def refresh_summary(db: Session, tenant_id: int, bucket_date: date) -> UsageSumm
     row.avg_latency_ms = int(round(float(counters[5])))
     row.p95_latency_ms = _percentile(latencies, 0.95)
     row.cache_hits = int(counters[6])
+
+    # Key 图表物化汇总：看板请求不再扫描不可变流水。
+    key_rows = db.execute(
+        select(
+            LlmUsageRecord.key_id,
+            func.coalesce(func.sum(case((LlmUsageRecord.status.in_(QUOTA_CONSUMING_STATUSES), 1), else_=0)), 0),
+            func.coalesce(func.sum(LlmUsageRecord.prompt_tokens), 0),
+            func.coalesce(func.sum(LlmUsageRecord.completion_tokens), 0),
+            func.coalesce(func.sum(case((LlmUsageRecord.cache_hit.is_(True), 1), else_=0)), 0),
+        ).where(*in_day).group_by(LlmUsageRecord.key_id)
+    ).all()
+    existing_key_rows = db.execute(
+        select(UsageKeySummary).where(UsageKeySummary.bucket_date == bucket_date)
+    ).scalars().all()
+    existing_by_key = {item.key_id: item for item in existing_key_rows}
+    seen_keys: set[int] = set()
+    for key_id, requests, prompt, completion, cache_hits in key_rows:
+        normalized_key_id = int(key_id or 0)
+        seen_keys.add(normalized_key_id)
+        key_row = existing_by_key.get(normalized_key_id)
+        if key_row is None:
+            key_row = UsageKeySummary(
+                tenant_id=tenant_id, bucket_date=bucket_date, key_id=normalized_key_id
+            )
+            db.add(key_row)
+        key_row.requests = int(requests)
+        key_row.prompt_tokens = int(prompt)
+        key_row.completion_tokens = int(completion)
+        key_row.cache_hits = int(cache_hits)
+    for stale in existing_key_rows:
+        if stale.key_id not in seen_keys:
+            db.delete(stale)
+
+    # 延迟直方图同样物化，供 ECharts 柱状图直接读取。
+    bucket_definitions = (("0-500ms", 0, 500), ("500ms-1s", 500, 1000),
+                          ("1s-2s", 1000, 2000), ("2s-5s", 2000, 5000),
+                          ("5s+", 5000, None))
+    existing_buckets = {
+        item.bucket: item
+        for item in db.execute(
+            select(UsageLatencyBucket).where(UsageLatencyBucket.bucket_date == bucket_date)
+        ).scalars().all()
+    }
+    for label, lower, upper in bucket_definitions:
+        predicates = [*in_day, LlmUsageRecord.latency_ms >= lower]
+        if upper is not None:
+            predicates.append(LlmUsageRecord.latency_ms < upper)
+        count = int(db.execute(select(func.count(LlmUsageRecord.id)).where(*predicates)).scalar_one())
+        bucket = existing_buckets.get(label)
+        if bucket is None:
+            bucket = UsageLatencyBucket(tenant_id=tenant_id, bucket_date=bucket_date, bucket=label)
+            db.add(bucket)
+        bucket.count = count
     db.commit()
     return row
 
