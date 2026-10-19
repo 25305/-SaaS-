@@ -126,13 +126,13 @@ api_key 表: [('sk-uj-bwqqw', 64, 'active'), ('sk-t8d3yKfS', 64, 'revoked')]
 |---|---|---|
 | `FOR UPDATE` 行锁 | 仅 MySQL 生效；SQLite 端按方言跳过（`app/services/quota/service.py::ensure_current_period`） | 开发期并发跨月重置无锁保护；生产切 MySQL 后生效，需在 MySQL 上补一次并发演练 |
 | 预检数据源精度 | 租户口径读 `usage_summary` 聚合表 | 存在刷新延迟，临界点可能"多用"一点，见《配额与计量说明.md》取舍说明 |
-| 本地模型与真实模型 | 未配置 `MODEL_BASE_URL` 时用 `LocalSimulationClient`（`provider=local-simulation`） | 其 usage 由内置分词器统计并**如实标注来源**；`usage_source` 统一为 `"response.usage"`，接入真实供应商后无需改计量代码 |
+| 本地模型与真实模型 | 未配置 `MODEL_BASE_URL` 时用 `LocalSimulationClient`（`provider=local-simulation`） | 其 usage 由内置分词器统计并**如实标注来源**；`usage_source` 统一为 `"response.usage"`，无需改计量代码。真实供应商（阿里云百炼 OpenAI 兼容端点）**已由后续批次接入并实测**，Token 取自 `response.usage` 的计量口径保持成立，见《运维手册》第 1 节 |
 | 隔离例外 | `resolve_api_key` 在无租户上下文时按全局唯一 `key_hash` 反查 | 已在代码与文档标注，待**成员 B 评审确认**（等价于按唯一键取单行，不构成越权） |
-| 限流 | `rate_limit_per_minute/per_hour` 字段已定稿并随 Key 暴露，但**拦截执行属成员 D 的 E 模块** | 本模块只提供配置与契约，不宣称限流已生效 |
-| 覆盖范围 | 未验证 MySQL 方言、多进程并发拒绝竞态、真实供应商 usage 解析 | 上线前需在独立测试库演练 |
+| 限流 | `rate_limit_per_minute/per_hour` 字段由本批次定稿并随 Key 暴露 | 拦截执行**已由后续批次（成员 D 的 E 模块）补齐**：滑动窗口限流（Key 与租户双维度）在模型调用前执行，超限返回 429 `RATE_LIMITED` 并附 `retry_after`，见 `tests/test_rate_limit_cache.py`；本批次自身只提供配置与契约 |
+| 覆盖范围 | 未验证多进程并发拒绝竞态；真实供应商 usage 解析已由后续批次实测（MySQL 建表与冒烟已于 2026-10-18 完成，见《运维手册》第 3 节） | 仍需在独立测试库补 MySQL 并发演练 |
 
 ---
 
 ## 六、结论
 
-模块 C/D 交付范围内 **20 条自动化用例全部通过**，成员 B 的 31 条既有用例无回归（全量 51 passed）。任务书 §五 自测清单 **11 项全部满足**，三条生死线（预检顺序、Token 来源、流水不可变）均有可复现的断言与现场日志佐证。剩余项均为已声明的边界（MySQL 行锁、限流执行归属成员 D、真实供应商接入），不影响本模块验收结论。
+模块 C/D 交付范围内 **20 条自动化用例全部通过**，成员 B 的 31 条既有用例无回归（全量 51 passed）。任务书 §五 自测清单 **11 项全部满足**，三条生死线（预检顺序、Token 来源、流水不可变）均有可复现的断言与现场日志佐证。剩余项均为已声明的边界（MySQL 行锁并发演练、多进程限流需切 Redis 共享计数），不影响本模块验收结论；限流执行与真实供应商接入已由后续批次补齐。
