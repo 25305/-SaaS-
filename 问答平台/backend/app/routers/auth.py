@@ -61,17 +61,22 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user.tenant.is_active:
         raise BizError("TENANT_DISABLED", "租户已停用", 403)
 
+    role = user.role_code
     token = create_access_token(
         user_id=user.id,
         tenant_id=user.tenant_id,
-        role=user.role_code,
-        is_super_admin=(user.role_code == "super_admin"),
+        role=role,
+        is_super_admin=(role == "super_admin"),
     )
     return ok(
         TokenResponse(
             access_token=token,
             token_type="bearer",
             expires_in=settings.JWT_EXPIRE_MINUTES * 60,
+            username=user.username,
+            role=role,
+            tenant_code=user.tenant.code,
+            home="/admin" if role == "super_admin" else "/workbench",
         )
     )
 

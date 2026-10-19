@@ -1,91 +1,16 @@
-<!--
-  应用外壳(模块 H):登录页独立渲染,其余页面统一"侧边导航 + 顶栏 + 内容区"。
-
-  导航项按角色过滤:viewer 看不到租户管理与 Key 管理入口(即便手输 URL,
-  路由守卫 meta.roles 也会把他推回工作台)。
--->
-<script setup>
-import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { api, clearSession, getRole, getTenant } from './api'
-
-const route = useRoute()
-const router = useRouter()
-
-// 登录页不套外壳,避免"未登录却看到导航"的错觉
-const isLogin = computed(() => route.name === 'login')
-
-// localStorage 不是响应式数据源:如果直接写 computed(() => getRole()),
-// 该 computed 没有任何响应式依赖,首次求值后会被永久缓存 —— App.vue 作为外壳
-// 不随路由重新挂载,于是登录/登出/换账号后顶栏角色与导航都会停留在旧值,
-// 必须整页刷新才恢复。故用 ref + 路由变化时重新读取。
-const role = ref(getRole())
-const tenant = ref(getTenant())
-watch(
-  () => route.fullPath,
-  () => {
-    role.value = getRole()
-    tenant.value = getTenant()
-  },
-)
-
-const NAV = [
-  { name: 'workbench', label: '用量工作台' },
-  { name: 'tenantAdmin', label: '租户管理', roles: ['super_admin'] },
-  { name: 'apiKeys', label: 'API Key 管理', roles: ['admin', 'super_admin'] },
-  { name: 'playground', label: '问答体验' },
-  { name: 'billing', label: '账单导出' },
-]
-
-const visibleNav = computed(() =>
-  NAV.filter((item) => !item.roles || item.roles.includes(role.value)))
-
-const TITLES = {
-  workbench: '用量工作台',
-  tenantAdmin: '租户管理台',
-  apiKeys: 'API Key 管理',
-  playground: '问答体验',
-  billing: '账单与计量',
-}
-const title = computed(() => TITLES[route.name] || '智能问答 SaaS')
-
-async function logout() {
-  try {
-    await api.logout()
-  } catch {
-    // 退出接口失败(如 Token 已过期)不影响本地清理,务必仍然登出
-  }
-  clearSession()
-  router.push({ name: 'login' })
-}
-</script>
-
 <template>
-  <router-view v-if="isLogin" />
-
-  <div v-else class="shell">
-    <aside>
-      <div class="brand"><b>Q</b><span>SMART<br />QA</span></div>
-      <nav>
-        <!-- FR-H7:v-for 使用路由名做业务唯一 key,不用 index -->
-        <button v-for="item in visibleNav" :key="item.name"
-                :class="{ active: route.name === item.name }"
-                @click="router.push({ name: item.name })">
-          {{ item.label }}
-        </button>
-      </nav>
-      <button class="logout" @click="logout">退出登录</button>
-    </aside>
-
-    <main class="workspace">
-      <header>
-        <div>
-          <p class="eyebrow">TENANT / {{ (tenant || 'unknown').toUpperCase() }}</p>
-          <h2>{{ title }}</h2>
-        </div>
-        <span class="badge badge-ok">{{ role || 'member' }}</span>
-      </header>
-      <router-view />
-    </main>
-  </div>
+  <RouterView v-if="route.name === 'login'" />
+  <div v-else class="shell"><aside><div class="brand"><b>Q</b><span>SMART<br>QA</span></div><nav><RouterLink v-if="isSuper" to="/admin">租户管理</RouterLink><RouterLink to="/workbench">工作台</RouterLink><RouterLink v-if="isAdmin" to="/keys">Key 管理</RouterLink><RouterLink to="/playground">问答体验</RouterLink><RouterLink to="/billing">账单与导出</RouterLink></nav><button class="logout" @click="logout">退出登录</button></aside><main class="workspace"><header><div><p class="eyebrow">{{ user?.tenant_code || 'TENANT' }}</p><h2>{{ title }}</h2></div><div class="identity"><strong>{{ user?.username || '加载中…' }}</strong><span class="role-badge">{{ currentRoleLabel }}</span></div></header><p v-if="forbidden" class="access-notice">当前账号没有该页面的访问权限，已返回可用页面。</p><p v-if="isReadonly" class="readonly-notice"><b>只读模式</b> 当前账号只能查看数据，不能执行管理操作。</p><RouterView /></main></div>
 </template>
+<script setup>
+import { computed, onMounted, ref, watch } from 'vue'; import { useRoute, useRouter } from 'vue-router'; import { request } from './api'; import { roleLabel } from './auth'
+const route=useRoute(),router=useRouter(),user=ref(null),forbidden=ref(false)
+const title=computed(()=>({ 'tenant-admin':'租户管理台', workbench:'用量工作台', 'api-keys':'API Key 管理', playground:'问答体验', billing:'账单与导出' }[route.name] || '智能问答 SaaS'))
+const isSuper=computed(()=>user.value?.role==='super_admin'),isAdmin=computed(()=>user.value?.role==='admin'),isReadonly=computed(()=>user.value?.role==='readonly')
+const currentRoleLabel=computed(()=>roleLabel[user.value?.role] || '身份加载中')
+async function loadMe(){try{user.value=await request('/api/auth/me');localStorage.setItem('smartqa_role',user.value.role);localStorage.setItem('smartqa_username',user.value.username);localStorage.setItem('smartqa_tenant',user.value.tenant_code)}catch{logout()}}
+function logout(){user.value=null;forbidden.value=false;for(const key of ['smartqa_token','smartqa_role','smartqa_username','smartqa_tenant']) localStorage.removeItem(key);router.push({name:'login'})}
+watch(()=>route.query.reason,(reason)=>{if(reason==='forbidden'){forbidden.value=true;const query={...route.query};delete query.reason;router.replace({query})}else if(!reason&&route.name==='login'){forbidden.value=false}},{immediate:true})
+watch(()=>route.name,(name,previous)=>{if(name!=='login'&&previous==='login') loadMe()})
+onMounted(loadMe)
+</script>
