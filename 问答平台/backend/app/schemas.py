@@ -62,6 +62,9 @@ class TenantInfo(BaseModel):
     name: str = Field(description="租户名称")
     is_active: bool = Field(description="是否启用")
     user_count: int = Field(description="成员数量")
+    quota_monthly_tokens: Optional[int] = Field(default=None, description="月度 Token 上限；null 表示不限制")
+    quota_monthly_requests: Optional[int] = Field(default=None, description="月度请求次数上限；null 表示不限制")
+    overage_policy: Literal["reject", "soft_warn"] = Field(default="reject", description="超额处理策略")
 
 
 class TenantQuotaUpdate(BaseModel):
