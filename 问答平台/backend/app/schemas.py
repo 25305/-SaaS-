@@ -18,6 +18,10 @@ class TokenResponse(BaseModel):
     access_token: str = Field(description="JWT 访问令牌")
     token_type: str = Field(default="bearer", description="令牌类型")
     expires_in: int = Field(description="有效期（秒）")
+    username: str = Field(description="当前用户名")
+    role: str = Field(description="角色编码")
+    tenant_code: str = Field(description="所属租户编码")
+    home: Literal["/admin", "/workbench"] = Field(description="该角色默认入口")
 
 class UserInfoResponse(BaseModel):
     id: int = Field(description="用户 ID")
@@ -58,24 +62,12 @@ class TenantInfo(BaseModel):
     name: str = Field(description="租户名称")
     is_active: bool = Field(description="是否启用")
     user_count: int = Field(description="成员数量")
-    # 配额与超额策略(FR-H2:租户管理台可查看/设置;FR-D6 策略可选)
-    quota_monthly_tokens: Optional[int] = Field(default=None, description="月度 Token 上限;null 为不限制")
-    quota_monthly_requests: Optional[int] = Field(default=None, description="月度请求次数上限;null 为不限制")
-    overage_policy: str = Field(default="reject", description="超额行为:reject 直接拒绝 / soft_warn 软超额告警")
 
 
 class TenantQuotaUpdate(BaseModel):
-    """平台管理员设置租户配额与超额策略(FR-D1/FR-D6)。PATCH 语义:只更新传入字段。"""
-
-    quota_monthly_tokens: Optional[int] = Field(
-        default=None, ge=0, description="月度 Token 上限;显式传 null 表示不限制"
-    )
-    quota_monthly_requests: Optional[int] = Field(
-        default=None, ge=0, description="月度请求次数上限;显式传 null 表示不限制"
-    )
-    overage_policy: Optional[Literal["reject", "soft_warn"]] = Field(
-        default=None, description="超额行为:reject 直接拒绝 / soft_warn 软超额告警(FR-D6)"
-    )
+    quota_monthly_tokens: Optional[int] = Field(default=None, ge=0)
+    quota_monthly_requests: Optional[int] = Field(default=None, ge=0)
+    overage_policy: Literal["reject", "soft_warn"] = Field(default="reject")
 
 
 class KBCreate(BaseModel):
