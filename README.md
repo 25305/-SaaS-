@@ -90,3 +90,16 @@ python -m pytest tests -q      # 期望 71 passed
 **当前范围：**知识库与文档隔离、可观测性、API Key 全生命周期、配额预检与不可变计量流水、滑动窗口限流（Key + 租户双维度）、问答缓存（租户前缀隔离）、用量看板与账单导出/可追溯校验，以及前端管理台 6 个页面均已接入。
 
 **尚未接入：**知识块（chunk）级切分与向量检索。**真实模型上游已接入并跑通**：阿里云百炼（DashScope）的 OpenAI 兼容端点，密钥取自机器环境变量 `DASHSCOPE_API_KEY`（不写入 `.env`），模型 `qwen-flash`——问答返回真实答案，Token 取自模型响应的 `usage`（不估算）并落库。注意 `qwen-turbo` 等旧模型会被限流（429 `limit_requests`，属**速率限流**而非余额不足），换 `qwen-flash` / `qwen-plus` 即可。把 `MODEL_BASE_URL` 留空即回退内置本地模拟模型（`provider=local-simulation`，用量如实标注来源、不伪装为真实供应商）。限流与登出黑名单为进程内实现，多 worker 部署须切 Redis。错误码与预留字段不等于这些模块已完成。
+## 协作与提交流程
+
+为满足交付要求中的"至少 1 个 PR 与评审记录"，所有改动遵循以下流程：
+
+1. **不直接提交 `main`**：从 `main` 新建特性分支，命名约定：
+   - 新功能/模块：`feature/<模块>-<简述>`，如 `feature/D-ratelimit-cache`；
+   - 缺陷修复：`fix/<简述>`，如 `fix/D-integration-regressions`。
+2. **提交信息**：单行，说清"改了什么、为什么"，如 `docs: 同步限流与真实模型的过期表述`。
+3. **发起 PR**：`base` 选 `main`；描述中写明关联任务书条目、改动清单与验证结果（测试命令及通过数）。
+4. **评审记录（必需）**：由**另一名成员**在 PR 的 `Files changed → Review changes → Approve` 提交评审意见；GitHub 不允许自审，故提交者本人不得充当评审人。
+5. **合并**：至少 1 条批准后 `Merge pull request`，合并后删除来源分支。
+
+> 远端仓库：`https://github.com/25305/-SaaS-` 。已有先例 PR #7、#8 按上述流程完成合并。
