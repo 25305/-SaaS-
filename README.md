@@ -29,7 +29,7 @@ npm run dev        # http://localhost:5173，已配置 /api 代理到 127.0.0.1:
 跑测试（工作目录 `问答平台/backend`）：
 
 ```powershell
-python -m pytest tests -q      # 期望 63 passed
+python -m pytest tests -q      # 期望 71 passed
 ```
 
 ## 演示账号
@@ -42,8 +42,9 @@ python -m pytest tests -q      # 期望 63 passed
 | `academic` | `academic_admin` | `Academic@123` | `admin` | 学术问答租户管理员 |
 | `academic` | `academic_viewer` | `Viewer@123` | `readonly` | 只读成员（无 Key 管理权限） |
 | `physics` | `physics_admin` | `Physics@123` | `admin` | 物理问答租户管理员 |
+| `logistics` | `logistics_admin` | `Logistics@123` | `admin` | 后勤处租户管理员 |
 
-登录页点选演示账号即可一键填充。演示知识库（图书馆借阅规则、教务处选课须知、牛顿力学基础、物理学史）同时写入，详见 [数据来源清单](问答平台/docs/数据来源清单.md)。
+演示账号由种子脚本在上表写入（密码可直接用于验收）。演示知识库（图书馆借阅规则、教务处选课须知、牛顿力学基础、物理学史、后勤报修与宿舍管理）同时写入，详见 [数据来源清单](问答平台/docs/数据来源清单.md)。
 
 ## 接口与能力
 
